@@ -118,6 +118,14 @@ class AirClient(object):
     def __init__(self, host):
         self._host = host
         self._session_key = None
+        self._load_key()
+        if not self._session_key:
+            self._get_key()
+        resp = self._get('1/device')
+        self.name = resp['name']
+        self.type = resp['type']
+        self.model = resp['modelid']
+        self.software = resp['swversion']
 
     def _get_key(self):
 
@@ -150,7 +158,7 @@ class AirClient(object):
         with open(fpath, 'w') as f:
             config.write(f)
 
-    def load_key(self):
+    def _load_key(self):
         fpath = os.path.expanduser('~/.pyairctrl')
         if os.path.isfile(fpath):
             config = configparser.ConfigParser()
@@ -158,14 +166,6 @@ class AirClient(object):
             if 'keys' in config and self._host in config['keys']:
                 hex_key = config['keys'][self._host]
                 self._session_key = bytes.fromhex(hex_key)
-                self._check_key()
-            else:
-                self._get_key()
-        else:
-            self._get_key()
-
-    def _check_key(self):
-        self._get('1/air')
 
     def set_values(self, values, debug=False):
         status = self._put('1/air', values, encrypted=True)
@@ -234,9 +234,6 @@ class AirClient(object):
         firmware = self._get('0/firmware')
         pprint.pprint(firmware)
 
-    def get_device(self):
-        return self._get('1/device')
-
     # endpoint '1/userinfo' ?
 
     def get_filters(self):
@@ -286,9 +283,7 @@ def main():
     
     for device in devices:
         c = AirClient(device['ip'])
-        c.load_key()
-        id = c.get_device()
-        print(f'{id["name"]}: (model {id["modelid"]}, IP {device["ip"]})')
+        print(f'{c.name}: (model {c.model}, IP {device["ip"]})')
         if args.wifi:
             c.get_wifi()
             sys.exit(0)
