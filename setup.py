@@ -1,8 +1,8 @@
 import setuptools
 import sys
 
-if sys.version_info < (3,4):
-    sys.exit("Python 3.4 or newer is required.")
+if sys.version_info < (3,6):
+    sys.exit("Python 3.6 or newer is required.")
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
