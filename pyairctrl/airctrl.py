@@ -74,6 +74,8 @@ class AirClient(object):
                    'values': {0: 'none', 49408: 'no water', 32768: 'water tank open', 49155: 'pre-filter must be cleaned'} }
     }
 
+    _log = logging.getLogger('AirClient')
+
     @staticmethod
     def ssdp(timeout=1, repeats=3):
         addr = '239.255.255.250'
@@ -94,7 +96,7 @@ class AirClient(object):
                 try:
                     while True:
                         data, (ip, _) = s.recvfrom(1024)
-                        logging.debug(data)
+                        AirClient._log.debug(data)
                         url = next((x for x in data.decode('ascii').splitlines() if x.startswith('LOCATION: ')), None)
                         urls.update({ip: url[10:]})
                 except socket.timeout:
@@ -110,7 +112,7 @@ class AirClient(object):
                 for d in xml.findall('urn:device', ns):
                     for t in ['modelName', 'modelNumber', 'friendlyName']:
                         resp[-1].update({t: d.find('urn:'+t, ns).text})
-        logging.debug(resp)
+        AirClient._log.debug(resp)
         return resp
 
     def __init__(self, host):
@@ -130,7 +132,7 @@ class AirClient(object):
         G = int('A4D1CBD5C3FD34126765A442EFB99905F8104DD258AC507FD6406CFF14266D31266FEA1E5C41564B777E690F5504F213160217B4B01B886A5E91547F9E2749F4D7FBD7D3B9A92EE1909D0D2263F80A76A6A24C087A091F531DBF0A0169B6A28AD662A4D18E73AFA32D779D5918D08BC8858F4DCEF97C2A24855E6EEB22B3B2E5', 16)
         P = int('B10B8F96A080E01DDE92DE5EAE5D54EC52C99FBCFB06A3C69A6A9DCA52D23B616073E28675A23D189838EF1E2EE652C013ECB4AEA906112324975C3CD49B83BFACCBDD7D90C4BD7098488E9C219A73724EFFD6FAE5644738FAA31A4FF55BCCC0A151AF5F0DC8B4BD45BF37DF365C1A65E68CFDA76D4DA708DF1FB2BC2E4A4371', 16)
 
-        logging.info('Exchanging secret key with the device ...')
+        self._log.info('Exchanging secret key with the device ...')
         a = random.getrandbits(256)
         A = pow(G, a, P)
         data = json.dumps({'diffie': format(A, 'x')})
@@ -152,7 +154,7 @@ class AirClient(object):
             config['keys'] = {}
         hex_key = self._session_key.hex()
         config['keys'][self._host] = hex_key
-        logging.info(f'Saving session_key {hex_key} to {fpath}')
+        self._log.info(f'Saving session_key {hex_key} to {fpath}')
         with open(fpath, 'w') as f:
             config.write(f)
 
@@ -177,37 +179,37 @@ class AirClient(object):
         self._put('0/wifi', values, encrypted=True)
 
     def _get_once(self, endpoint):
-        response = requests.get(f'http://{self._host}/di/v1/products/{endpoint}')
-        response.raise_for_status()
-        resp = decrypt(response.text, self._session_key)
-        jsonresp = json.loads(resp)
-        logging.debug(jsonresp)
-        return jsonresp;
+        resp = requests.get(f'http://{self._host}/di/v1/products/{endpoint}')
+        resp.raise_for_status()
+        assert resp.status_code != 255, \
+            'An option not supported by device ' + resp.text
+        resp = decrypt(resp.text, self._session_key)
+        self._log.debug(resp)
+        return json.loads(resp)
 
     def _get(self, endpoint):
         try:
             return self._get_once(endpoint)
-        except Exception as e:
-            logging.warning(f'Cannot read from device: {type(e).__name__}: {e}')
-        logging.warning('Will retry after getting a new key ...')
-        self._get_key()
-        return self._get_once(endpoint)
+        except ValueError as e:
+            self._log.warning(f'Cannot read from device: {type(e).__name__}: {e}')
+            self._log.warning('Will retry after getting a new key ...')
+            self._get_key()
+            return self._get_once(endpoint)
 
     def _put(self, endpoint, body, encrypted=False):
-        logging.debug(body)
+        self._log.debug(body)
         if encrypted:
             body = encrypt(body, self._session_key)
         url = f'http://{self._host}/di/v1/products/{endpoint}'
-        response = requests.put(url, body)
-        response.raise_for_status()
-        assert response.status_code != 255 and len(response.text) != 1, \
-            'An option not supported by device'
-        resp = response.text
+        resp = requests.put(url, body)
+        resp.raise_for_status()
+        assert resp.status_code != 255, \
+            'An option not supported by device ' + resp.text
+        resp = resp.text
         if encrypted:
             resp = decrypt(resp, self._session_key)
-        jsonresp = json.loads(resp)
-        logging.debug(jsonresp)
-        return jsonresp
+        self._log.debug(resp)
+        return json.loads(resp)
 
     def print_status(self, status):
         for opt, val in status.items():
@@ -255,7 +257,7 @@ class AirClient(object):
 def main():
     parser = argparse.ArgumentParser()
     parser.register('type', 'bool', (lambda x: bool(strtobool(x))))
-    parser.add_argument('--ipaddr', help='IP address of air purifier', action='append')
+    parser.add_argument('--ipaddr', help='hostname/IP address of air purifier', action='append')
     parser.add_argument('-d', '--debug', help='show debug output', action='store_true')
     parser.add_argument('-v', '--verbose', help='show verbose output', action='store_true')
     parser.add_argument('--om', help='set fan speed', choices=['1','2','3','s','t'])
@@ -274,12 +276,13 @@ def main():
     parser.add_argument('--wifi-pwd', help='set wifi password')
     parser.add_argument('--firmware', help='read firmware', action='store_true')
     parser.add_argument('--filters', help='read filters status', action='store_true')
+    parser.add_argument('--json', help='dump all device info in JSON', action='store_true')
     args = parser.parse_args()
 
     if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level='DEBUG')
     elif args.verbose:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level='INFO')
 
     if args.ipaddr:
         devices = [ {'ip': ip} for ip in args.ipaddr ]
@@ -289,25 +292,36 @@ def main():
             logging.critical('Air purifier not autodetected. Try --ipaddr option to force specific IP address.')
             sys.exit(1)
     
+    if args.json:
+        resp = []
+        for device in devices:
+            c = AirClient(device['ip'])
+            data = { 'host': device['ip'] }
+            for r in ['1/device', '0/security', '0/firmware', '0/wifi', '1/air', '1/fltsts']:
+                data.update({ r.split('/')[-1]: c._get(r) })
+            resp.append(data)
+        print(json.dumps(resp, indent=2))
+        return
+
     for device in devices:
         c = AirClient(device['ip'])
-        print(f'{c.name}: (model {c.model}, IP {device["ip"]})')
+        print(f'{c.name}: (model {c.model}, address {device["ip"]})')
         if args.wifi:
             for k,v in c.get_wifi().items():
                 print(f'{k}: {v}')
-            sys.exit(0)
+            continue
         if args.firmware:
             for k,v in c.get_firmware().items():
                 print(f'{k}: {v}')
-            sys.exit(0)
+            continue
         if args.wifi_ssid or args.wifi_pwd:
             c.set_wifi(args.wifi_ssid, args.wifi_pwd)
-            sys.exit(0)
+            continue
         if args.filters:
             c.print_filters()
-            sys.exit(0)
+            continue
 
-        r_opts = ['ipaddr', 'debug', 'verbose', 'firmware', 'filters', 'wifi', 'wifi-ssid', 'wifi-pws']
+        r_opts = ['ipaddr', 'debug', 'verbose', 'firmware', 'filters', 'wifi', 'wifi-ssid', 'wifi-pws', 'json']
         values = dict(filter(lambda x: x[1] != None and x[0] not in r_opts, vars(args).items()))
 
         if values:
