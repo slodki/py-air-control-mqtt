@@ -11,7 +11,7 @@ import json
 import random
 import os
 import sys
-import pprint
+import logging
 import configparser
 import socket
 import xml.etree.ElementTree as ET
@@ -111,8 +111,7 @@ class AirClient(object):
                 for d in xml.findall('urn:device', ns):
                     for t in ['modelName', 'modelNumber', 'friendlyName']:
                         resp[-1].update({t: d.find('urn:'+t, ns).text})
-        if debug:
-            pprint.pprint(resp)
+        logging.debug(resp)
         return resp
 
     def __init__(self, host):
@@ -177,9 +176,9 @@ class AirClient(object):
             values['ssid'] = ssid
         if pwd:
             values['password'] = pwd
-        pprint.pprint(values)
+        logging.debug(values)
         wifi = self._put('0/wifi', values, encrypted=True)
-        pprint.pprint(wifi)
+        logging.debug(wifi)
 
     def _get_once(self, endpoint):
         response = requests.get(f'http://{self._host}/di/v1/products/{endpoint}')
@@ -210,9 +209,7 @@ class AirClient(object):
         return json.loads(resp)
 
     def _dump_status(self, status, debug=False):
-        if debug:
-            pprint.pprint(status)
-            print()
+        logging.debug(status)
         for opt, val in status.items():
             opt_def = self.options.get(opt, None)
             if opt_def:
@@ -228,11 +225,11 @@ class AirClient(object):
 
     def get_wifi(self):
         wifi = self._get('0/wifi')
-        pprint.pprint(wifi)
+        print(wifi)
 
     def get_firmware(self):
         firmware = self._get('0/firmware')
-        pprint.pprint(firmware)
+        print(firmware)
 
     # endpoint '1/userinfo' ?
 
@@ -247,7 +244,7 @@ class AirClient(object):
     def pair(self, client_id, client_secret):
         values = {'Pair': ['FI-AIR-AND', client_id, client_secret] }
         resp = self._put('0/pairing', values, encrypted=True)
-        pprint.pprint(resp)
+        print(resp)
 
 
 def main():
